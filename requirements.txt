@@ -1,0 +1,12 @@
+gradio
+gradio-log
+psutil
+flash_attn
+onnx==1.15.0
+onnxruntime-gpu==1.19.2
+timm==0.6.7
+fairscale==0.4.13
+numpy==1.26.4
+bitsandbytes
+diffusers[torch]==0.32.2
+gradio==5.23.1

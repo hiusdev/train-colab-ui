@@ -1,0 +1,58 @@
+[training_config]
+pretrained_model_name_or_path = "/content/models/flux1-dev.safetensors"
+clip_l = "/content/models/text_encoders/clip_l.safetensors"
+ae = "/content/models/ae.safetensors"
+t5xxl = "/content/models/text_encoders/t5xxl_fp16.safetensors"
+output_dir = "/content/output"
+output_name = "hius"
+max_train_steps = 500
+train_batch_size = 1
+seed = 42
+save_every_n_steps = 200
+mixed_precision = "bf16"
+save_precision = "bf16"
+sdpa = true
+max_data_loader_n_workers = 2
+persistent_data_loader_workers = true
+gradient_checkpointing = true
+
+[optimizer_config]
+optimizer_type = "AdamW8bit"
+optimizer_args = ""
+learning_rate = 1e-5
+text_encoder_lr = 1e-5
+lr_scheduler = "cosine"
+lr_warmup_steps = 0
+
+[network_config]
+network_dim = 32
+text_encoder_lr = 1e-5
+network_module = "networks.lora_flux"
+network_alpha = 32
+network_args = ""
+
+[noise_config]
+noise_offset = 0.1
+adaptive_noise_scale = 0.01
+multires_noise_iterations = 0.3
+multires_noise_discount = 6
+
+[sample_config]
+sample_every_n_steps = 400
+sample_at_first = true
+sample_prompts = "/content/config/sample_prompt.toml"
+
+[flux_config]
+guidance_scale = 1.0
+discrete_flow_shift = 3.1582
+timestep_sampling = "shift"
+model_prediction_type="raw"
+cache_text_encoder_outputs = true
+cache_text_encoder_outputs_to_disk = true
+
+[log_config]
+log_with = "tensorboard"
+wandb_api_key = ""
+log_tracker_name = "Lah_Team"
+logging_dir = "/content/log"
+log_prefix = "Lah_Team"
