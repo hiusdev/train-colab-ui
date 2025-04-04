@@ -7,7 +7,7 @@ import time
 import signal
 import random
 import os
-
+import re
 import argparse
 from copy import deepcopy
 
@@ -19,8 +19,8 @@ from ui_utils import (
     dropdown_from_config,
 )
 
-# import image_to_tags
-# import image_to_captions
+import image_to_tags
+import image_to_captions
 import huggingface_hub
 from PIL import Image
 from pathlib import Path
@@ -29,8 +29,8 @@ root_dir = os.path.dirname(os.path.abspath(__file__))
 
 print(root_dir)
 
-LOG_FILE = "test.log"
-PID_FILE = "test.pid"
+# LOG_FILE = "test.log"
+# PID_FILE = "test.pid"
 
 LOG_FILE = os.path.join(root_dir, "test.log")
 PID_FILE = os.path.join(root_dir, "test.pid")
@@ -340,6 +340,54 @@ def on_generate_dataset_config(
     return config_str, config_sample_str
 
 
+def is_flux_running():
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "flux_train_network.py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        output = result.stdout.strip()
+
+        if not output:
+            return False  # Không tìm thấy tiến trình
+
+        pids = [int(pid) for pid in output.splitlines()]
+        for pid in pids:
+            if is_pid_alive(pid):
+                return True
+
+        return False  # Có PID nhưng không còn sống
+    except Exception as e:
+        print(f"❌ Lỗi kiểm tra flux_train_network: {e}")
+        return False
+
+
+def is_sdxl_running():
+    try:
+        result = subprocess.run(
+            ["pgrep", "-f", "sdxl_train_network.py"],
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+        )
+        output = result.stdout.strip()
+
+        if not output:
+            return False  # Không tìm thấy tiến trình
+
+        pids = [int(pid) for pid in output.splitlines()]
+        for pid in pids:
+            if is_pid_alive(pid):
+                return True
+
+        return False  # Có PID nhưng không còn sống
+    except Exception as e:
+        print(f"❌ Lỗi kiểm tra sdxl_train_network: {e}")
+        return False
+
+
 def is_pid_alive(pid):
     try:
         os.kill(pid, 0)
@@ -358,26 +406,24 @@ def start_process(num_prompts):
     else:
         btn = gr.update(interactive=True)
     # Kiểm tra PID đang chạy không
-    if os.path.exists(PID_FILE):
-        try:
-            with open(PID_FILE, "r") as f:
-                pid = int(f.read().strip())
-            check = is_pid_alive(pid)
-            if check:
-                return (
-                    "⚠️ test.py đã chạy rồi.",
-                    gr.update(interactive=False),
-                    btn,
-                    gr.update(interactive=False),
-                )
-        except Exception as e:
-            print(f"⚠️ Lỗi kiểm tra PID: {e}")
-            # Cho phép chạy lại nếu lỗi đọc file
-
+    if train_type == "flux":
+        if is_flux_running():
+            return (
+                gr.update(interactive=False),
+                btn,
+                gr.update(interactive=False),
+            )
+    else:
+        if is_flux_running():
+            return (
+                gr.update(interactive=False),
+                btn,
+                gr.update(interactive=False),
+            )
     # Chạy test.py bằng nohup
     # cmd = f"nohup python3 test.py > {LOG_FILE} 2>&1 & echo $! > {PID_FILE}"
 
-    cmd = f"nohup accelerate launch /content/kohya-trainer/flux_train_network.py --dataset_config='/content/config/dataset_config.toml' --config_file='/content/config/config_final.toml' > {LOG_FILE} 2>&1 & echo $! > {PID_FILE}"
+    cmd = f"nohup accelerate launch /content/kohya-trainer/{train_type}_train_network.py --dataset_config='/content/colab_ui/config/dataset_config.toml' --config_file='/content/colab_ui/config/config_final.toml' > {LOG_FILE} 2>&1 & echo $! > {PID_FILE}"
 
     subprocess.call(cmd, shell=True)
 
@@ -385,6 +431,7 @@ def start_process(num_prompts):
     is_run = True
 
     content = "🚀 Đã bắt đầu"
+
     return (
         gr.update(interactive=False),
         btn,
@@ -393,7 +440,25 @@ def start_process(num_prompts):
 
 
 def stop_process():
-    if not os.path.exists(PID_FILE):
+    try:
+        # os.kill(pid, signal.SIGTERM)
+        result = subprocess.run(["pkill", "-f", "flux_train_network.py"])
+        if result.returncode == 0:
+            return (
+                f"🛑 Đã dừng tiến trình",
+                gr.update(interactive=True),
+                gr.update(interactive=False),
+                gr.update(interactive=False),
+            )
+        else:
+            return (
+                f"🛑 Đã dừng tiến trình",
+                gr.update(interactive=False),
+                gr.update(interactive=True),
+                gr.update(interactive=True),
+            )
+
+    except Exception as e:
         return (
             "⚠️ Không có tiến trình đang chạy.",
             gr.update(interactive=False),
@@ -401,26 +466,13 @@ def stop_process():
             gr.update(interactive=False),
         )
 
-    with open(PID_FILE, "r") as f:
-        pid = int(f.read().strip())
-
-    try:
-        os.kill(pid, signal.SIGTERM)
-        os.remove(PID_FILE)
-        global is_run
-        is_run = False
-        return (
-            f"🛑 Đã dừng tiến trình (PID {pid})",
-            gr.update(interactive=True),
-            gr.update(interactive=False),
-            gr.update(interactive=False),
-        )
-    except Exception as e:
-        return f"❌ Không thể dừng: {e}"
-
 
 content = ""
 is_run = False
+
+
+def clear_spaces(s):
+    return re.sub(r"\s+", " ", s.strip())
 
 
 def stream_log():
@@ -443,8 +495,10 @@ def stream_log():
             with open(LOG_FILE, "r") as f:
                 f.seek(last_pos)
                 lines = f.readlines()
-                if lines:
-                    content += "".join(lines)
+                for line in lines:
+                    content += clear_spaces(line) + "\n"
+                # if lines:
+                #     content += "".join(lines)
 
                 last_pos = f.tell()
 
@@ -477,10 +531,12 @@ def tags(dir_data, model_repo, threshold, character_threshold):
         return csv_path, model_path
 
     if not os.path.isdir(dir_data):
+        gr.Warning(f"path '{dir_data} cannot be found.")
         raise FileNotFoundError(f"path '{dir_data} cannot be found.'")
 
     dir_files = os.listdir(dir_data)
     if len(dir_files) == 0:
+        gr.Warning(f"No files in path '{dir_data}'.")
         raise FileNotFoundError(f"No files in path '{dir_data}'.")
 
     valid_extensions = [".png", ".jpg", ".jpeg", ".webp"]
@@ -503,7 +559,7 @@ def tags(dir_data, model_repo, threshold, character_threshold):
                 csv_path,
                 model_path,
                 general_threshold=threshold,
-                character_threshold=threshold,
+                character_threshold=character_threshold,
             )
             # content += additional_feature + "\n"
             content += "🖼️" + image_path + ": 📜" + additional_feature + "\n"
@@ -515,7 +571,6 @@ def tags(dir_data, model_repo, threshold, character_threshold):
 # Hàm để dừng quá trình
 def captions(
     captions_models,
-    prompt,
     dir_data,
 ):
     from transformers import AutoProcessor, AutoModelForCausalLM
@@ -534,10 +589,12 @@ def captions(
     processor = AutoProcessor.from_pretrained(model_id, trust_remote_code=True)
 
     if not os.path.isdir(dir_data):
+        gr.Warning(f"path '{dir_data} cannot be found.'")
         raise FileNotFoundError(f"path '{dir_data} cannot be found.'")
 
     dir_files = os.listdir(dir_data)
     if len(dir_files) == 0:
+        gr.Warning(f"No files in path '{dir_data}'.")
         raise FileNotFoundError(f"No files in path '{dir_data}'.")
 
     valid_extensions = [".png", ".jpg", ".jpeg", ".webp"]
@@ -656,20 +713,11 @@ def auto_reload_config(train_type):
 
 def auto_reload_stop():
 
-    if os.path.exists(PID_FILE):
-        try:
-            with open(PID_FILE, "r") as f:
-                pid = int(f.read().strip())
-            if is_pid_alive(pid):
-                return gr.update(interactive=True)
-            else:
-                return gr.update(interactive=False)
-
-        except Exception as e:
-            print(f"⚠️ Lỗi kiểm tra PID: {e}")
-            return gr.update(interactive=False)
+    if is_flux_running():
+        return gr.update(interactive=True), gr.update(interactive=True)
     else:
-        return gr.update(interactive=False)
+
+        return gr.update(interactive=False), gr.update(interactive=False)
 
 
 CONFIG = load_config()
@@ -774,28 +822,23 @@ def load_file(path):
 def auto_load_configs():
     config_dir = os.path.join(root_dir, "config")
 
-    if os.path.exists(PID_FILE):
-        try:
-            with open(PID_FILE, "r") as f:
-                pid = int(f.read().strip())
-            if is_pid_alive(pid):
+    try:
+        if is_flux_running():
+            config_path = os.path.join(config_dir, "config_final.toml")
+            dataset_path = os.path.join(config_dir, "dataset_config.toml")
+            sample_path = os.path.join(config_dir, "sample_prompt.toml")
 
-                config_path = os.path.join(config_dir, "config_final.toml")
-                dataset_path = os.path.join(config_dir, "dataset_config.toml")
-                sample_path = os.path.join(config_dir, "sample_prompt.toml")
+            config_str = load_file(config_path)
+            dataset_str = load_file(dataset_path)
+            sample_str = load_file(sample_path)
 
-                config_str = load_file(config_path)
-                dataset_str = load_file(dataset_path)
-                sample_str = load_file(sample_path)
+            return config_str, dataset_str, sample_str
+        else:
 
-                return config_str, dataset_str, sample_str
-            else:
-
-                return gr.update(value=""), gr.update(value=""), gr.update(value="")
-        except Exception as e:
-            print(f"⚠️ Lỗi kiểm tra PID: {e}")
             return gr.update(value=""), gr.update(value=""), gr.update(value="")
-    else:
+
+    except Exception as e:
+        print(f"⚠️ Lỗi kiểm tra PID: {e}")
         return gr.update(value=""), gr.update(value=""), gr.update(value="")
 
 
@@ -807,11 +850,19 @@ def change_text_encoder(text_encoder):
         return gr.Textbox(visible=False)
 
 
-def check_demo(output_dir, num_prompts):
+def check_demo(output_dir):
     from PIL import Image
     import os
 
     sample_folder = os.path.join(output_dir, "sample")
+    config_dir = os.path.join(root_dir, "config")
+
+    sample_config = os.path.join(config_dir, "sample_prompt.toml")
+
+    data = toml.load(sample_config)
+    subsets = data["prompt"]["subset"]
+
+    num_prompts = len(subsets)
 
     image_files = sorted(
         [
@@ -1163,14 +1214,14 @@ def main(train_type, config_path=None):
             )
             with gr.Row():
                 start_tag_btn = gr.Button("Start tags")
-                stop_btn = gr.Button("Stop")
+                stop_tag_btn = gr.Button("Stop")
             tags_status = gr.Textbox(label="Tags Output", lines=10)
             start_tag_btn.click(
                 fn=tags,
                 inputs=[tags_data_dir, tags_models, threshold, character_threshold],
                 outputs=tags_status,
             )
-            stop_btn.click(stop_tags_process, outputs=None)
+            stop_tag_btn.click(stop_tags_process, outputs=None)
 
             gr.Markdown("## Captions")
             captions_data_dir = gr.Textbox(
@@ -1188,17 +1239,16 @@ def main(train_type, config_path=None):
                 value="microsoft/Florence-2-large-ft",
             )
 
-            caption_prompt = gr.Textbox(label="Prompt", lines=5)
             with gr.Row():
                 start_cap_btn = gr.Button("🚀 Start caption")
-                stop_btn = gr.Button("🛑 Stop")
+                stop_cap_btn = gr.Button("🛑 Stop")
             captions_status = gr.Textbox(label="Captions Output", lines=10)
             start_cap_btn.click(
                 fn=captions,
-                inputs=[captions_models, caption_prompt, captions_data_dir],
+                inputs=[captions_models, captions_data_dir],
                 outputs=captions_status,
             )
-            stop_btn.click(stop_captions_process, outputs=None)
+            stop_cap_btn.click(stop_captions_process, outputs=None)
 
         # === Tab 1: Model ==
 
@@ -1273,7 +1323,7 @@ def main(train_type, config_path=None):
         )
         check_btn.click(
             check_demo,
-            inputs=[output_dir, num_prompts],
+            inputs=[output_dir],
             outputs=[
                 log_output,
                 state_samples,
@@ -1318,7 +1368,7 @@ def main(train_type, config_path=None):
         demo.load(
             fn=auto_reload_stop,
             inputs=[],
-            outputs=[stop_btn],
+            outputs=[check_btn, stop_btn],
         )
         demo.launch(share=True)
 

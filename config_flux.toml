@@ -40,7 +40,7 @@ multires_noise_discount = 6
 [sample_config]
 sample_every_n_steps = 400
 sample_at_first = true
-sample_prompts = "/content/config/sample_prompt.toml"
+sample_prompts = "/content/colab_ui/config/sample_prompt.toml"
 
 [flux_config]
 guidance_scale = 1.0
