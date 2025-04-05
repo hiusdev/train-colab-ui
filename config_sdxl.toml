@@ -1,8 +1,6 @@
 [training_config]
-pretrained_model_name_or_path = "/content/models/flux1-dev.safetensors"
-clip_l = "/content/models/text_encoders/clip_l.safetensors"
-ae = "/content/models/ae.safetensors"
-t5xxl = "/content/models/text_encoders/t5xxl_fp16.safetensors"
+pretrained_model_name_or_path = ""
+vae = "/content/models/sdxl.vae.safetensors"
 output_dir = "/content/output"
 output_name = "hius"
 max_train_epochs = 10
@@ -30,7 +28,7 @@ lr_warmup_steps = 0
 [network_config]
 network_dim = 32
 text_encoder_lr = 1e-5
-network_module = "networks.lora_flux"
+network_module = "networks.lora"
 network_alpha = 32
 network_args = ""
 
@@ -41,16 +39,11 @@ multires_noise_iterations = 0.3
 multires_noise_discount = 6
 
 [sample_config]
-sample_every_n_epochs = 400
+sample_every_n_steps = 400
 sample_at_first = true
 sample_prompts = "/content/colab_ui/config/sample_prompt.toml"
-sample_sampler= "euler"
 
-[flux_config]
-guidance_scale = 1.0
-discrete_flow_shift = 3.1582
-timestep_sampling = "shift"
-model_prediction_type = "raw"
+[sdxl_config]
 cache_text_encoder_outputs = false
 cache_text_encoder_outputs_to_disk = false
 
@@ -67,7 +60,6 @@ metadata_description = "support by lahteam.vn"
 training_comment = "support by lahteam.vn"
 resume = ""
 save_state = false
-
 
 [dataset_config]
 train_data_dir = ""

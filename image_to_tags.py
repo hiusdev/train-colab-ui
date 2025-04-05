@@ -96,9 +96,9 @@ def run_tags(dir_data, dir_image, csv_path, model_path, general_threshold =  0.4
         im = im.convert("RGB")
 
     additional_feature = tag(im,csv_path, model_path,threshold=general_threshold,character_threshold=character_threshold)
-    path_img = dir_image.split(".")[0]
+    # path_img = dir_image.split(".")[0]
 
-    # print(path_img +": "+ additional_feature)
-    with open(os.path.join(dir_data, path_img)+".txt", 'a') as the_file:
-        the_file.write(','+additional_feature)
+    # # print(path_img +": "+ additional_feature)
+    # with open(os.path.join(dir_data, path_img)+".txt", 'a') as the_file:
+    #     the_file.write(','+additional_feature)
     return additional_feature

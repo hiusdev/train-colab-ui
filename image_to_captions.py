@@ -1,8 +1,4 @@
-
-
 from PIL import Image
-import requests
-import copy
 import torch
 import os
 
@@ -14,8 +10,6 @@ Cap_prompt = {
     'Medium':['<DETAILED_CAPTION>',10,100,'medium-length'],
     'Long':['<MORE_DETAILED_CAPTION>',10,150,'very long']
 }
-
-
 
 def run_example(model,processor,task_prompt,image, text_input=None):
     if text_input is None:
@@ -66,8 +60,8 @@ def run_captions(model, processor, dir_data, dir_image):
     content = content.replace('This is an','an')
     content = content.replace('This is a','a')
 
-    # print(content)
+    # # print(content)
 
-    with open(txt_file_path, 'a') as txt_file:
-        txt_file.write(content)
+    # with open(txt_file_path, 'a') as txt_file:
+    #     txt_file.write(content)
     return content

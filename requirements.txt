@@ -10,3 +10,4 @@ numpy==1.26.4
 bitsandbytes
 diffusers[torch]==0.32.2
 gradio==5.23.1
+wandb

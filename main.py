@@ -27,7 +27,7 @@ from pathlib import Path
 
 root_dir = os.path.dirname(os.path.abspath(__file__))
 
-print(root_dir)
+# print(root_dir)
 
 # LOG_FILE = "test.log"
 # PID_FILE = "test.pid"
@@ -63,6 +63,20 @@ def parse_args():
         "--config_file",
         type=str,
         help="Tuỳ chọn file TOML thay vì config_{train_type}.toml",
+    )
+
+    parser.add_argument(
+        "--model_path",
+        default=None,
+        type=str,
+        help="only for sdxl",
+    )
+
+    parser.add_argument(
+        "--share",
+        default=False,
+        type=bool,
+        help="public gradio",
     )
     return parser.parse_args()
 
@@ -112,15 +126,28 @@ def update_prompt_with_subsets(dataset_config, num_prompts):
     # Đọc cấu hình dataset_config
     # dataset_config = read_toml_file(dataset_config_path)
     # Đoạn mã tạo cấu hình prompt mặc định
-    prompt_config = {
-        "prompt": {
-            "width": 1024,
-            "height": 1024,
-            "scale": 3.5,
-            "sample_steps": 28,
-            "subset": [],  # Sẽ được cập nhật với các subsets từ dataset_config
+
+    if train_type == "flux":
+
+        prompt_config = {
+            "prompt": {
+                "width": 1024,
+                "height": 1024,
+                "scale": 3.5,
+                "sample_steps": 28,
+                "subset": [],  # Sẽ được cập nhật với các subsets từ dataset_config
+            }
         }
-    }
+    else:
+        prompt_config = {
+            "prompt": {
+                "width": 758,
+                "height": 1024,
+                "scale": 7,
+                "sample_steps": 28,
+                "subset": [],  # Sẽ được cập nhật với các subsets từ dataset_config
+            }
+        }
 
     if dataset_config and "datasets" in dataset_config:
         subsets = []
@@ -156,20 +183,24 @@ def update_prompt_with_subsets(dataset_config, num_prompts):
                             prompt_config["prompt"]["subset"].append(new_prompt)
 
                         # Cập nhật subset với số lượng prompt lấy được
-                        subset["num_prompts_taken"] = len(prompts)
+                        # subset["num_prompts_taken"] = len(prompts)
                         subsets.append(subset)
 
     return prompt_config
 
 
 def parse_folder_name(folder_name):
-    folder_name_parts = folder_name.split("_")
-    if len(folder_name_parts) > 1:
-        if folder_name_parts[0].isdigit():
-            num_repeats = int(folder_name_parts[0])
-            class_token = "_".join(folder_name_parts[1:])
-            return num_repeats, class_token
-    return None, None
+    try:
+        folder_name_parts = folder_name.split("_")
+        # print(folder_name_parts)
+        if len(folder_name_parts) > 1:
+            if folder_name_parts[0].isdigit():
+                num_repeats = int(folder_name_parts[0])
+                class_token = "_".join(folder_name_parts[1:])
+                return num_repeats, class_token
+        return None, None
+    except Exception as e:
+        print(f"\n❌ Error reading log: {e}")
 
 
 def find_image_files(path):
@@ -181,97 +212,155 @@ def find_image_files(path):
     ]
 
 
-def process_data_dir(data_dir, is_finetune, caption_extension, is_reg=False):
+def process_data_dir2(data_dir, num_repeats, caption_extension, is_reg=False):
     subsets = []
+
     if not os.path.isdir(data_dir):
         return subsets
 
-    for root, dirs, files in os.walk(data_dir):
-        for folder in dirs:
-            folder_path = os.path.join(root, folder)
+    all_subfolders = get_subfolders_or_self(data_dir)
 
-            num_repeats, class_token = parse_folder_name(folder)
-            if not num_repeats:
-                continue  # Bỏ qua thư mục không đúng định dạng
+    for folder in all_subfolders:
 
-            images = find_image_files(folder_path)
-            if not images:
-                continue  # Bỏ qua nếu không có ảnh
+        folder_name = os.path.basename(folder)
+        repeats, class_token = parse_folder_name(folder_name)
 
-            # Lấy danh sách các file caption của thư mục
-            txt_caption_files = [
-                f for f in os.listdir(folder_path) if f.endswith(".txt")
-            ]
-            caption_caption_files = [
-                f for f in os.listdir(folder_path) if f.endswith(".caption")
-            ]
+        # print(repeats, class_token)
 
-            # Kiểm tra và tạo các subnet
-            if caption_extension == "all":
-                # Nếu thư mục có cả .txt và .caption, tạo 2 subnet
-                if txt_caption_files:
-                    subsets.append(
-                        create_subset(
-                            folder_path,
-                            num_repeats,
-                            class_token,
-                            ".txt",
-                            is_finetune,
-                            is_reg,
-                        )
-                    )
-                if caption_caption_files:
-                    subsets.append(
-                        create_subset(
-                            folder_path,
-                            num_repeats,
-                            class_token,
-                            ".caption",
-                            is_finetune,
-                            is_reg,
-                        )
-                    )
-            elif caption_extension == ".txt" and txt_caption_files:
-                # Chỉ tạo subnet cho .txt
+        if repeats:
+            num_repeats = repeats
+
+        # print(num_repeats)
+
+        images = find_image_files(folder)
+        if not images:
+            continue  # Bỏ qua nếu không có ảnh
+
+        # Lấy danh sách các file caption của thư mục
+        txt_caption_files = [f for f in os.listdir(folder) if f.endswith(".txt")]
+        caption_caption_files = [
+            f for f in os.listdir(folder) if f.endswith(".caption")
+        ]
+
+        # Kiểm tra và tạo các subnet
+        if caption_extension == "all":
+            # Nếu thư mục có cả .txt và .caption, tạo 2 subnet
+            if txt_caption_files:
                 subsets.append(
                     create_subset(
-                        folder_path,
+                        folder,
                         num_repeats,
                         class_token,
                         ".txt",
-                        is_finetune,
                         is_reg,
                     )
                 )
-            elif caption_extension == ".caption" and caption_caption_files:
-                # Chỉ tạo subnet cho .caption
+            if caption_caption_files:
                 subsets.append(
                     create_subset(
-                        folder_path,
+                        folder,
                         num_repeats,
                         class_token,
                         ".caption",
-                        is_finetune,
                         is_reg,
                     )
+                )
+        elif caption_extension == ".txt" and txt_caption_files:
+            # Chỉ tạo subnet cho .txt
+            subsets.append(
+                create_subset(
+                    folder,
+                    num_repeats,
+                    class_token,
+                    ".txt",
+                    is_reg,
+                )
+            )
+        elif caption_extension == ".caption" and caption_caption_files:
+            # Chỉ tạo subnet cho .caption
+            subsets.append(
+                create_subset(
+                    folder,
+                    num_repeats,
+                    class_token,
+                    ".caption",
+                    is_reg,
+                )
+            )
+
+    return subsets
+
+
+def process_data_dir(data_dir, num_repeats, caption_extension, is_reg=False):
+    if not os.path.isdir(data_dir):
+        return []
+
+    subsets = []
+    all_subfolders = get_subfolders_or_self(data_dir)
+    # print(all_subfolders)
+
+    for folder in all_subfolders:
+        folder_name = os.path.basename(folder)
+        repeats, class_token = parse_folder_name(folder_name)
+        current_repeats = repeats or num_repeats
+
+        if not find_image_files(folder):
+            continue
+
+        # Kiểm tra caption có tồn tại không
+        caption_types = {
+            ".txt": any(f.endswith(".txt") for f in os.listdir(folder)),
+            ".caption": any(f.endswith(".caption") for f in os.listdir(folder)),
+        }
+
+        # Nếu không có file caption nào thì bỏ qua thư mục
+        if not any(caption_types.values()):
+            continue
+
+        # Xác định các định dạng cần xử lý
+        extensions_to_process = (
+            [".txt", ".caption"]
+            if caption_extension == "all"
+            else (
+                [caption_extension]
+                if caption_types.get(caption_extension, False)
+                else []
+            )
+        )
+
+        for ext in extensions_to_process:
+            if caption_types[ext]:
+                subsets.append(
+                    create_subset(folder, current_repeats, class_token, ext, is_reg)
                 )
 
     return subsets
 
 
-def create_subset(
-    folder_path, num_repeats, class_token, caption_extension, is_finetune, is_reg
-):
+def create_subset(folder_path, num_repeats, class_token, caption_extension, is_reg):
+
     subset = {
         "image_dir": folder_path,
         "num_repeats": num_repeats,
         "caption_extension": caption_extension,
     }
-    if not is_finetune:
+
+    if class_token != None:
         subset["class_tokens"] = class_token
+
     if is_reg:
         subset["is_reg"] = True
     return subset
+
+
+def get_subfolders_or_self(folder_path):
+    all_folders = []
+
+    for dirpath, dirnames, _ in os.walk(folder_path):
+        for dirname in dirnames:
+            all_folders.append(os.path.join(dirpath, dirname))
+
+    return all_folders if all_folders else [folder_path]
 
 
 def on_generate_dataset_config(
@@ -281,17 +370,16 @@ def on_generate_dataset_config(
     resolution,
     flip_aug,
     keep_tokens,
+    num_repeats,
     num_prompts,
 ):
-
-    is_finetune = False  # currently hardcoded, can be exposed in UI later
 
     config_dir = os.path.join(root_dir, "config")
     # print(config_dir)
     # Cập nhật gọi hàm với caption_extension
-    train_subsets = process_data_dir(train_data_dir, is_finetune, caption_extension)
+    train_subsets = process_data_dir(train_data_dir, num_repeats, caption_extension)
     reg_subsets = process_data_dir(
-        reg_data_dir, is_finetune, caption_extension, is_reg=True
+        reg_data_dir, num_repeats, caption_extension, is_reg=True
     )
 
     subsets = train_subsets + reg_subsets
@@ -364,10 +452,10 @@ def is_flux_running():
         return False
 
 
-def is_sdxl_running():
+def is_running(train_type):
     try:
         result = subprocess.run(
-            ["pgrep", "-f", "sdxl_train_network.py"],
+            ["pgrep", "-f", f"{train_type}_train_network.py"],
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
             text=True,
@@ -384,7 +472,7 @@ def is_sdxl_running():
 
         return False  # Có PID nhưng không còn sống
     except Exception as e:
-        print(f"❌ Lỗi kiểm tra sdxl_train_network: {e}")
+        print(f"❌ Lỗi kiểm tra {train_type}_train_network: {e}")
         return False
 
 
@@ -406,20 +494,13 @@ def start_process(num_prompts):
     else:
         btn = gr.update(interactive=True)
     # Kiểm tra PID đang chạy không
-    if train_type == "flux":
-        if is_flux_running():
-            return (
-                gr.update(interactive=False),
-                btn,
-                gr.update(interactive=False),
-            )
-    else:
-        if is_flux_running():
-            return (
-                gr.update(interactive=False),
-                btn,
-                gr.update(interactive=False),
-            )
+
+    if is_running(train_type):
+        return (
+            gr.update(interactive=False),
+            btn,
+            gr.update(interactive=False),
+        )
     # Chạy test.py bằng nohup
     # cmd = f"nohup python3 test.py > {LOG_FILE} 2>&1 & echo $! > {PID_FILE}"
 
@@ -443,20 +524,13 @@ def stop_process():
     try:
         # os.kill(pid, signal.SIGTERM)
         result = subprocess.run(["pkill", "-f", "flux_train_network.py"])
-        if result.returncode == 0:
-            return (
-                f"🛑 Đã dừng tiến trình",
-                gr.update(interactive=True),
-                gr.update(interactive=False),
-                gr.update(interactive=False),
-            )
-        else:
-            return (
-                f"🛑 Đã dừng tiến trình",
-                gr.update(interactive=False),
-                gr.update(interactive=True),
-                gr.update(interactive=True),
-            )
+
+        return (
+            f"🛑 Đã dừng tiến trình",
+            gr.update(interactive=True),
+            gr.update(interactive=False),
+            gr.update(interactive=False),
+        )
 
     except Exception as e:
         return (
@@ -514,7 +588,7 @@ stop_tags_flag = False
 stop_captions_flag = False
 
 
-def tags(dir_data, model_repo, threshold, character_threshold):
+def tags(dir_data, model_repo, tags_trigger, threshold, character_threshold):
     global stop_tags_flag
     stop_tags_flag = False
     content = ""
@@ -561,18 +635,21 @@ def tags(dir_data, model_repo, threshold, character_threshold):
                 general_threshold=threshold,
                 character_threshold=character_threshold,
             )
+            prompt = tags_trigger + ", " + additional_feature
+
+            path_txt = image_path.split(".")[0]
+
+            with open(os.path.join(dir_data, path_txt) + ".txt", "a") as the_file:
+                the_file.write(prompt)
             # content += additional_feature + "\n"
-            content += "🖼️" + image_path + ": 📜" + additional_feature + "\n"
+            content += "🖼️" + image_path + ": 📜" + prompt + "\n"
             yield content
         content += " Hoàn thành"
         yield content
 
 
 # Hàm để dừng quá trình
-def captions(
-    captions_models,
-    dir_data,
-):
+def captions(captions_models, dir_data, caps_trigger):
     from transformers import AutoProcessor, AutoModelForCausalLM
 
     global stop_captions_flag
@@ -611,8 +688,15 @@ def captions(
             additional_feature = image_to_captions.run_captions(
                 model, processor, dir_data, image_path
             )
+
+            prompt = caps_trigger + ", " + additional_feature
+
+            path_txt = image_path.split(".")[0]
+
+            with open(os.path.join(dir_data, path_txt) + ".caption", "a") as the_file:
+                the_file.write(prompt)
             # content += additional_feature + "\n"
-            content += "🖼️" + image_path + ": 📜" + additional_feature + "\n"
+            content += "🖼️" + image_path + ": 📜" + prompt + "\n"
             yield content
         content += " Hoàn thành"
         yield content
@@ -675,13 +759,12 @@ def deep_merge_dict(base, override):
 def auto_reload_config(train_type):
     try:
         # Ưu tiên: final > user > base
-        final_path = os.path.join(root_dir, "config", "config_final.toml")
-        user_path = f"config_user_{train_type}.toml"
-        base_path = f"config_{train_type}.toml"
+        # final_path = os.path.join(root_dir, "config", "config_final.toml")
+        user_path = os.path.join(root_dir, f"config_user_{train_type}.toml")
 
-        if os.path.exists(final_path):
-            path_to_load = final_path
-        elif os.path.exists(user_path):
+        base_path = os.path.join(root_dir, f"config_{train_type}.toml")
+
+        if os.path.exists(user_path):
             path_to_load = user_path
         elif os.path.exists(base_path):
             path_to_load = base_path
@@ -713,7 +796,7 @@ def auto_reload_config(train_type):
 
 def auto_reload_stop():
 
-    if is_flux_running():
+    if is_running(train_type):
         return gr.update(interactive=True), gr.update(interactive=True)
     else:
 
@@ -736,13 +819,16 @@ def set_value_by_path(config: dict, path: str, value):
 
 def save_user_config(*values):
     try:
-        base_config = toml.load(f"config_{train_type}.toml")
+
+        base_config = toml.load(os.path.join(root_dir, f"config_{train_type}.toml"))
+
         config_user = deepcopy(base_config)
 
         for path, value in zip(FIELD_PATHS, values):
             set_value_by_path(config_user, path, value)
 
-        config_file = f"config_user_{train_type}.toml"
+        config_file = os.path.join(root_dir, f"config_user_{train_type}.toml")
+
         with open(config_file, "w", encoding="utf-8") as f:
             toml.dump(config_user, f)
         gr.Info("Lưu thành côngℹ️", duration=5)
@@ -764,28 +850,51 @@ def on_setup_button_click(text_encoder, num_prompts, resolution, *values):
         # print(os.path.join(root_dir,"config_{train_type}.toml"))
         config_final = deepcopy(config)
         content += "📦 Đã load file config.toml\n"
-
+        # if(train_type=="flux"):
         # Gán lại các field từ UI
         for path, value in zip(FIELD_PATHS, values):
             set_value_by_path(config_final, path, value)
 
         # Điều kiện đặc biệt cho Flux + text_encoder
-        if train_type.lower() == "flux" and text_encoder:
-            # print("text_encoder")
-            config_final["flux_config"]["cache_text_encoder_outputs"] = False
-            config_final["flux_config"]["cache_text_encoder_outputs_to_disk"] = False
-            config_final["network_config"]["network_args"] = ["train_t5xxl=true"]
-            content += "⚙️ Áp dụng cấu hình đặc biệt cho Flux + text_encoder\n"
+        if train_type.lower() == "flux":
+            if config_final["optimizer_config"]["optimizer_type"] == "AdaFactor":
+                config_final["optimizer_config"]["optimizer_args"] = [
+                    "relative_step=False" "scale_parameter=False" "warmup_init=False"
+                ]
+                config_final["optimizer_config"][
+                    "lr_scheduler"
+                ] = "constant_with_warmup"
+
+            if text_encoder:
+                config_final["network_config"]["network_args"] = ["train_t5xxl=true"]
+                config_final["training_config"]["network_train_unet_only"] = False
+        else:
+            config_final["training_config"][
+                "pretrained_model_name_or_path"
+            ] = model_path
+
+        if config_final["log_config"]["wandb_api_key"] != None:
+            config_final["log_config"]["log_with"] = "wandb"
+            config_final["log_config"]["wandb_run_name"] = (
+                train_type + "_lora_" + config_final["training_config"]["output_name"]
+            )
+
+        config_final["advanced_config"]["metadata_title"] = config_final[
+            "training_config"
+        ]["output_name"]
+
+        content += "⚙️ Áp dụng cấu hình đặc biệt cho Flux + text_encoder\n"
 
         # Ghi file config_final
         config_dir = os.path.join(root_dir, "config")
         os.makedirs(config_dir, exist_ok=True)
-        config_final_path = os.path.join(config_dir, "config_final.toml")
-        with open(config_final_path, "w", encoding="utf-8") as f:
-            toml.dump(config_final, f)
-        content += f"💾 Đã lưu file cấu hình vào {config_final_path}\n"
 
-        # Gọi on_generate_dataset_config
+        user_config = os.path.join(root_dir, f"config_user_{train_type}.toml")
+        
+        with open(user_config, "w", encoding="utf-8") as f:
+            toml.dump(config_final, f)
+        
+                # Gọi on_generate_dataset_config
         dataset_str, sample_str = on_generate_dataset_config(
             config_final["dataset_config"]["train_data_dir"],
             config_final["dataset_config"]["reg_data_dir"],
@@ -793,8 +902,32 @@ def on_setup_button_click(text_encoder, num_prompts, resolution, *values):
             resolution,
             config_final["dataset_config"]["flip_aug"],
             config_final["dataset_config"]["keep_tokens"],
+            config_final["dataset_config"]["num_repeats"],
             num_prompts,
         )
+
+        if (
+            "sample_config" in config_final
+            and "num_prompts" in config_final["sample_config"]
+        ):
+            del config_final["sample_config"]["num_prompts"]
+        if (
+            "training_config" in config_final
+            and "text_encoder" in config_final["training_config"]
+        ):
+            del config_final["training_config"]["text_encoder"]
+        
+        if (
+            "dataset_config" in config_final
+        ):
+            del config_final["dataset_config"]
+
+        config_final_path = os.path.join(config_dir, "config_final.toml")
+        with open(config_final_path, "w", encoding="utf-8") as f:
+            toml.dump(config_final, f)
+        content += f"💾 Đã lưu file cấu hình vào {config_final_path}\n"
+
+
 
         content += "✅ Hoàn tất setup. Cấu hình dataset đã được sinh.\n"
 
@@ -823,8 +956,11 @@ def auto_load_configs():
     config_dir = os.path.join(root_dir, "config")
 
     try:
-        if is_flux_running():
-            config_path = os.path.join(config_dir, "config_final.toml")
+        if is_running(train_type):
+            config_path = os.path.join(root_dir, f"config_user_{train_type}.toml")
+            if not os.path.exists(config_path):
+                config_path = os.path.join(root_dir, f"config_{train_type}.toml")
+
             dataset_path = os.path.join(config_dir, "dataset_config.toml")
             sample_path = os.path.join(config_dir, "sample_prompt.toml")
 
@@ -927,9 +1063,9 @@ def on_gallery_click(evt: gr.SelectData, originals, samples):
     return gr.update(value=combined_image, visible=True)
 
 
-def main(train_type, config_path=None):
+def main(args):
 
-    print(f"🚀 Running in train mode: {train_type}")
+    print(f"🚀 Running in train mode: {args.train_type}")
 
     with gr.Blocks() as demo:
 
@@ -957,17 +1093,17 @@ def main(train_type, config_path=None):
                         "Gradient Checkpointing",
                         info="Enable gradient checkpointing to reduce memory usage.",
                     )
-                    max_train_steps = number_from_config(
+                    max_train_epochs = number_from_config(
                         CONFIG,
-                        "training_config.max_train_steps",
-                        "Max Train Steps",
-                        info="Total number of training steps.",
+                        "training_config.max_train_epochs",
+                        "Max Train Epochs",
+                        info="Training Epochs",
                     )
-                    save_every_n_steps = number_from_config(
+                    save_every_n_epochs = number_from_config(
                         CONFIG,
-                        "training_config.save_every_n_steps",
-                        "Save Every N Steps",
-                        info="Checkpoint will be saved every N steps.",
+                        "training_config.save_every_n_epochs",
+                        "Save Every N Epochs",
+                        info="save checkpoint every N epochs ",
                     )
                     train_batch_size = number_from_config(
                         CONFIG,
@@ -976,21 +1112,51 @@ def main(train_type, config_path=None):
                         info="Batch size used during training.",
                     )
 
-                    gr.Markdown("## ⚙️ Logging")
-                    wandb_api_key = textbox_from_config(
+                    gr.Markdown("## ⚙️ Advanced")
+
+                    author = textbox_from_config(
                         CONFIG,
-                        "log_config.wandb_api_key",
-                        "WandB API Key",
-                        type="password",
-                        info="Weights & Biases API key for logging (leave blank to disable).",
+                        "advanced_config.author",
+                        "Author",
+                        # info="Save State for train next",
+                    )
+
+                    save_state = checkbox_from_config(
+                        CONFIG,
+                        "advanced_config.save_state",
+                        "Save State",
+                        info="Save State for train next",
+                    )
+
+                    resume = textbox_from_config(
+                        CONFIG,
+                        "advanced_config.resume",
+                        "Resume",
+                        info="Path saved previous State to train next",
                     )
 
                 with gr.Column():
                     gr.Markdown("## ⚙️ Optimizer")
-                    optimizer_type = textbox_from_config(
+                    optimizer_type = dropdown_from_config(
                         CONFIG,
                         "optimizer_config.optimizer_type",
                         "Optimizer Type",
+                        choices=[
+                            "AdamW",
+                            "AdamW8bit",
+                            "Lion8bit",
+                            "Lion",
+                            "SGDNesterov",
+                            "SGDNesterov8bit",
+                            "DAdaptation(DAdaptAdamPreprint)",
+                            "DAdaptAdaGrad",
+                            "DAdaptAdam",
+                            "DAdaptAdan",
+                            "DAdaptAdanIP",
+                            "DAdaptLion",
+                            "DAdaptSGD",
+                            "AdaFactor",
+                        ],
                         info="Optimizer type: AdamW, AdamW8bit, PagedAdamW, etc.",
                     )
                     optimizer_args = textbox_from_config(
@@ -1005,7 +1171,14 @@ def main(train_type, config_path=None):
                         "Learning Rate",
                         info="Base learning rate.",
                     )
-                    text_encoder = gr.Checkbox(label="Text Encoder", value=True)
+                    # text_encoder = gr.Checkbox(label="Text Encoder", value=True)
+                    text_encoder = checkbox_from_config(
+                        CONFIG,
+                        "training_config.text_encoder",
+                        "Text Encoder",
+                        info="Base learning rate.",
+                    )
+
                     text_encoder_lr = number_from_config(
                         CONFIG,
                         "optimizer_config.text_encoder_lr",
@@ -1016,7 +1189,14 @@ def main(train_type, config_path=None):
                         CONFIG,
                         "optimizer_config.lr_scheduler",
                         "LR Scheduler",
-                        choices=["constant", "linear", "cosine", "polynomial"],
+                        choices=[
+                            "constant_with_warmup",
+                            "constant",
+                            "linear",
+                            "cosine",
+                            "polynomial",
+                            "cosine_with_restarts",
+                        ],
                         info="Schedule type for learning rate.",
                     )
                     lr_warmup_steps = number_from_config(
@@ -1024,6 +1204,14 @@ def main(train_type, config_path=None):
                         "optimizer_config.lr_warmup_steps",
                         "LR Warmup Steps",
                         info="Warmup steps (int or float ratio).",
+                    )
+                    gr.Markdown("## ⚙️ Logging")
+
+                    wandb_api_key = textbox_from_config(
+                        CONFIG,
+                        "log_config.wandb_api_key",
+                        "WandB API Key",
+                        info="Weights & Biases API key for logging (leave blank to disable).",
                     )
 
                 with gr.Column():
@@ -1046,6 +1234,13 @@ def main(train_type, config_path=None):
                         "Caption Extension",
                         choices=[".txt", ".caption", "all"],
                         info="Extension of caption files.",
+                    )
+
+                    num_repeats = number_from_config(
+                        CONFIG,
+                        "dataset_config.num_repeats",
+                        "Num repeats",
+                        info="Có thể điều chỉnh repeat cho từng thư mục bằng cách đặt tên thư mục theo cú pháp {repeat}_{folder_name}",
                     )
                     resolution = slider_from_config(
                         CONFIG,
@@ -1071,11 +1266,11 @@ def main(train_type, config_path=None):
 
                     gr.Markdown("## Sample Config")
 
-                    sample_every_n_steps = number_from_config(
+                    sample_every_n_epochs = number_from_config(
                         CONFIG,
-                        "sample_config.sample_every_n_steps",
-                        "Sample Every N Steps",
-                        info="How often to generate samples during training.",
+                        "sample_config.sample_every_n_epochs",
+                        "Sample Every N Epochs",
+                        info="Generate sample images every N epochs",
                     )
                     num_prompts = number_from_config(
                         CONFIG,
@@ -1188,6 +1383,7 @@ def main(train_type, config_path=None):
             tags_data_dir = gr.Textbox(
                 label="Data Directory", value="as/tag/5_aesthetic"
             )
+            tags_trigger = gr.Textbox(value="", label=" Trigger word")
 
             tags_models = gr.Dropdown(
                 choices=[
@@ -1218,7 +1414,13 @@ def main(train_type, config_path=None):
             tags_status = gr.Textbox(label="Tags Output", lines=10)
             start_tag_btn.click(
                 fn=tags,
-                inputs=[tags_data_dir, tags_models, threshold, character_threshold],
+                inputs=[
+                    tags_data_dir,
+                    tags_models,
+                    tags_trigger,
+                    threshold,
+                    character_threshold,
+                ],
                 outputs=tags_status,
             )
             stop_tag_btn.click(stop_tags_process, outputs=None)
@@ -1227,6 +1429,7 @@ def main(train_type, config_path=None):
             captions_data_dir = gr.Textbox(
                 label="Data Directory", value=root_dir + "/as"
             )
+            caps_trigger = gr.Textbox(value="", label=" Trigger word")
 
             captions_models = gr.Dropdown(
                 choices=[
@@ -1245,7 +1448,7 @@ def main(train_type, config_path=None):
             captions_status = gr.Textbox(label="Captions Output", lines=10)
             start_cap_btn.click(
                 fn=captions,
-                inputs=[captions_models, captions_data_dir],
+                inputs=[captions_models, captions_data_dir, caps_trigger],
                 outputs=captions_status,
             )
             stop_cap_btn.click(stop_captions_process, outputs=None)
@@ -1260,10 +1463,10 @@ def main(train_type, config_path=None):
             "training_config.output_name": output_name,
             "training_config.output_dir": output_dir,
             "training_config.gradient_checkpointing": gradient_checkpointing,
-            "training_config.max_train_steps": max_train_steps,
-            "training_config.save_every_n_steps": save_every_n_steps,
+            "training_config.max_train_epochs": max_train_epochs,
+            "training_config.save_every_n_epochs": save_every_n_epochs,
             "training_config.train_batch_size": train_batch_size,
-            # "training_config.text_encoder": text_encoder,
+            "training_config.text_encoder": text_encoder,
             "log_config.wandb_api_key": wandb_api_key,
             "optimizer_config.optimizer_type": optimizer_type,
             "optimizer_config.optimizer_args": optimizer_args,
@@ -1274,13 +1477,16 @@ def main(train_type, config_path=None):
             "dataset_config.train_data_dir": train_data_dir,
             "dataset_config.reg_data_dir": reg_data_dir,
             "dataset_config.caption_extension": caption_extension,
-            # "sample_config.resolution": resolution,
+            "dataset_config.num_repeats": num_repeats,
+            "advanced_config.save_state": save_state,
+            "advanced_config.resume": resume,
+            "advanced_config.author": author,
             "dataset_config.flip_aug": flip_aug,
             "dataset_config.keep_tokens": keep_tokens,
-            "sample_config.sample_every_n_steps": sample_every_n_steps,
+            "sample_config.sample_every_n_epochs": sample_every_n_epochs,
             # "sample_config.sample_prompts": sample_prompts,
             # "flux_config.guidance_scale": guidance_scale,
-            # "sample_config.num_prompts": num_prompts,
+            "sample_config.num_prompts": num_prompts,
             "network_config.network_alpha": network_alpha,
             "network_config.network_dim": network_dim,
             "network_config.network_args": network_args,
@@ -1334,7 +1540,7 @@ def main(train_type, config_path=None):
         )
 
         save_btn.click(
-            fn=lambda *vals: save_user_config(train_type, *vals),
+            fn=lambda *vals: save_user_config(*vals),
             inputs=FIELD_INPUTS,
             outputs=[download_btn],
         )
@@ -1370,11 +1576,12 @@ def main(train_type, config_path=None):
             inputs=[],
             outputs=[check_btn, stop_btn],
         )
-        demo.launch(share=True)
+        demo.launch(share=args.share)
 
 
 if __name__ == "__main__":
     args = parse_args()
-    global train_type
+    global train_type, model_path
     train_type = args.train_type
-    main(args.train_type, args.config_file)
+    model_path = args.model_path
+    main(args)
