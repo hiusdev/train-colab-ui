@@ -4,7 +4,6 @@ import os
 import toml
 import glob
 import time
-import signal
 import random
 import os
 import re
@@ -23,14 +22,9 @@ import image_to_tags
 import image_to_captions
 import huggingface_hub
 from PIL import Image
-from pathlib import Path
 
 root_dir = os.path.dirname(os.path.abspath(__file__))
 
-# print(root_dir)
-
-# LOG_FILE = "test.log"
-# PID_FILE = "test.pid"
 
 LOG_FILE = os.path.join(root_dir, "test.log")
 PID_FILE = os.path.join(root_dir, "test.pid")
@@ -59,14 +53,16 @@ def parse_args():
         default="flux",
         help="Loại mô hình training (flux hoặc sdxl)",
     )
-    parser.add_argument(
-        "--config_file",
-        type=str,
-        help="Tuỳ chọn file TOML thay vì config_{train_type}.toml",
-    )
 
     parser.add_argument(
         "--model_path",
+        default=None,
+        type=str,
+        help="only for sdxl",
+    )
+
+    parser.add_argument(
+        "--vae_path",
         default=None,
         type=str,
         help="only for sdxl",
@@ -141,7 +137,7 @@ def update_prompt_with_subsets(dataset_config, num_prompts):
     else:
         prompt_config = {
             "prompt": {
-                "width": 758,
+                "width": 768,
                 "height": 1024,
                 "scale": 7,
                 "sample_steps": 28,
@@ -504,7 +500,7 @@ def start_process(num_prompts):
     # Chạy test.py bằng nohup
     # cmd = f"nohup python3 test.py > {LOG_FILE} 2>&1 & echo $! > {PID_FILE}"
 
-    cmd = f"nohup accelerate launch /content/kohya-trainer/{train_type}_train_network.py --dataset_config='/content/colab_ui/config/dataset_config.toml' --config_file='/content/colab_ui/config/config_final.toml' > {LOG_FILE} 2>&1 & echo $! > {PID_FILE}"
+    cmd = f"nohup accelerate launch --config_file '/content/accelerate_config/config.yaml' --num_cpu_threads_per_process 1  /content/kohya-trainer/{train_type}_train_network.py --dataset_config='/content/colab_ui/config/dataset_config.toml' --config_file='/content/colab_ui/config/config_final.toml' > {LOG_FILE} 2>&1 & echo $! > {PID_FILE}"
 
     subprocess.call(cmd, shell=True)
 
@@ -523,7 +519,9 @@ def start_process(num_prompts):
 def stop_process():
     try:
         # os.kill(pid, signal.SIGTERM)
-        result = subprocess.run(["pkill", "-f", "flux_train_network.py"])
+        result = subprocess.run(["pkill", "-f", f"{train_type}_train_network.py"])
+
+        gr.Info("Đã dừng training")
 
         return (
             f"🛑 Đã dừng tiến trình",
@@ -533,6 +531,7 @@ def stop_process():
         )
 
     except Exception as e:
+        gr.Info("Không có tiến trình đang chạy.")
         return (
             "⚠️ Không có tiến trình đang chạy.",
             gr.update(interactive=False),
@@ -803,9 +802,6 @@ def auto_reload_stop():
         return gr.update(interactive=False), gr.update(interactive=False)
 
 
-CONFIG = load_config()
-
-
 # === Save config ===
 def set_value_by_path(config: dict, path: str, value):
     keys = path.split(".")
@@ -831,6 +827,7 @@ def save_user_config(*values):
 
         with open(config_file, "w", encoding="utf-8") as f:
             toml.dump(config_user, f)
+
         gr.Info("Lưu thành côngℹ️", duration=5)
         return gr.update(value=config_file, visible=True)
     except Exception as e:
@@ -867,13 +864,17 @@ def on_setup_button_click(text_encoder, num_prompts, resolution, *values):
 
             if text_encoder:
                 config_final["network_config"]["network_args"] = ["train_t5xxl=true"]
-                config_final["training_config"]["network_train_unet_only"] = False
+
         else:
             config_final["training_config"][
                 "pretrained_model_name_or_path"
             ] = model_path
+            config_final["training_config"]["vae"] = vae_path
 
-        if config_final["log_config"]["wandb_api_key"] != None:
+        if text_encoder:
+            config_final["training_config"]["network_train_unet_only"] = False
+
+        if config_final["log_config"]["wandb_api_key"] != "":
             config_final["log_config"]["log_with"] = "wandb"
             config_final["log_config"]["wandb_run_name"] = (
                 train_type + "_lora_" + config_final["training_config"]["output_name"]
@@ -890,11 +891,11 @@ def on_setup_button_click(text_encoder, num_prompts, resolution, *values):
         os.makedirs(config_dir, exist_ok=True)
 
         user_config = os.path.join(root_dir, f"config_user_{train_type}.toml")
-        
+
         with open(user_config, "w", encoding="utf-8") as f:
             toml.dump(config_final, f)
-        
-                # Gọi on_generate_dataset_config
+
+            # Gọi on_generate_dataset_config
         dataset_str, sample_str = on_generate_dataset_config(
             config_final["dataset_config"]["train_data_dir"],
             config_final["dataset_config"]["reg_data_dir"],
@@ -916,18 +917,14 @@ def on_setup_button_click(text_encoder, num_prompts, resolution, *values):
             and "text_encoder" in config_final["training_config"]
         ):
             del config_final["training_config"]["text_encoder"]
-        
-        if (
-            "dataset_config" in config_final
-        ):
+
+        if "dataset_config" in config_final:
             del config_final["dataset_config"]
 
         config_final_path = os.path.join(config_dir, "config_final.toml")
         with open(config_final_path, "w", encoding="utf-8") as f:
             toml.dump(config_final, f)
         content += f"💾 Đã lưu file cấu hình vào {config_final_path}\n"
-
-
 
         content += "✅ Hoàn tất setup. Cấu hình dataset đã được sinh.\n"
 
@@ -1064,7 +1061,7 @@ def on_gallery_click(evt: gr.SelectData, originals, samples):
 
 
 def main(args):
-
+    CONFIG = load_config(args.train_type)
     print(f"🚀 Running in train mode: {args.train_type}")
 
     with gr.Blocks() as demo:
@@ -1205,14 +1202,6 @@ def main(args):
                         "LR Warmup Steps",
                         info="Warmup steps (int or float ratio).",
                     )
-                    gr.Markdown("## ⚙️ Logging")
-
-                    wandb_api_key = textbox_from_config(
-                        CONFIG,
-                        "log_config.wandb_api_key",
-                        "WandB API Key",
-                        info="Weights & Biases API key for logging (leave blank to disable).",
-                    )
 
                 with gr.Column():
                     gr.Markdown("## Dataset Config")
@@ -1264,21 +1253,6 @@ def main(args):
                         info="Keep this number of tokens from the prompt start.",
                     )
 
-                    gr.Markdown("## Sample Config")
-
-                    sample_every_n_epochs = number_from_config(
-                        CONFIG,
-                        "sample_config.sample_every_n_epochs",
-                        "Sample Every N Epochs",
-                        info="Generate sample images every N epochs",
-                    )
-                    num_prompts = number_from_config(
-                        CONFIG,
-                        "sample_config.num_prompts",
-                        "Number of Prompts to Sample",
-                        info="How many prompts to sample.",
-                    )
-
                 with gr.Column():
                     gr.Markdown("## ⚙️ Network")
                     network_alpha = number_from_config(
@@ -1300,37 +1274,61 @@ def main(args):
                         info="Extra network arguments (format: key=value).",
                     )
 
-                    gr.Markdown("## Noise Control")
-                    noise_offset = number_from_config(
+                    gr.Markdown("## Sample Config")
+
+                    sample_every_n_epochs = number_from_config(
                         CONFIG,
-                        "noise_config.noise_offset",
-                        "Noise Offset",
-                        info="Amount of noise offset to apply (e.g., 0.1).",
+                        "sample_config.sample_every_n_epochs",
+                        "Sample Every N Epochs",
+                        info="Generate sample images every N epochs",
                     )
-                    adaptive_noise_scale = textbox_from_config(
+                    num_prompts = number_from_config(
                         CONFIG,
-                        "noise_config.adaptive_noise_scale",
-                        "Adaptive Noise Scale",
-                        info="Noise scaled by mean absolute latent value.",
+                        "sample_config.num_prompts",
+                        "Number of Prompts to Sample",
+                        info="How many prompts to sample.",
                     )
-                    multires_noise_iterations = slider_from_config(
+
+                    gr.Markdown("## ⚙️ Logging")
+
+                    wandb_api_key = textbox_from_config(
                         CONFIG,
-                        "noise_config.multires_noise_iterations",
-                        "Multires Noise Iterations",
-                        minimum=0.1,
-                        maximum=1.0,
-                        step=0.1,
-                        info="How many iterations to apply multires noise.",
+                        "log_config.wandb_api_key",
+                        "WandB API Key",
+                        info="Weights & Biases API key for logging (leave blank to disable).",
                     )
-                    multires_noise_discount = slider_from_config(
-                        CONFIG,
-                        "noise_config.multires_noise_discount",
-                        "Multires Noise Discount",
-                        minimum=1,
-                        maximum=10,
-                        step=1,
-                        info="Discount multiplier for multires noise.",
-                    )
+
+                    # gr.Markdown("## Noise Control")
+                    # noise_offset = number_from_config(
+                    #     CONFIG,
+                    #     "noise_config.noise_offset",
+                    #     "Noise Offset",
+                    #     info="Amount of noise offset to apply (e.g., 0.1).",
+                    # )
+                    # adaptive_noise_scale = textbox_from_config(
+                    #     CONFIG,
+                    #     "noise_config.adaptive_noise_scale",
+                    #     "Adaptive Noise Scale",
+                    #     info="Noise scaled by mean absolute latent value.",
+                    # )
+                    # multires_noise_iterations = slider_from_config(
+                    #     CONFIG,
+                    #     "noise_config.multires_noise_iterations",
+                    #     "Multires Noise Iterations",
+                    #     minimum=0.1,
+                    #     maximum=1.0,
+                    #     step=0.1,
+                    #     info="How many iterations to apply multires noise.",
+                    # )
+                    # multires_noise_discount = slider_from_config(
+                    #     CONFIG,
+                    #     "noise_config.multires_noise_discount",
+                    #     "Multires Noise Discount",
+                    #     minimum=1,
+                    #     maximum=10,
+                    #     step=1,
+                    #     info="Discount multiplier for multires noise.",
+                    # )
             with gr.Row():
                 setup_btn = gr.Button("🚀Setup config")
                 with gr.Group():
@@ -1490,10 +1488,10 @@ def main(args):
             "network_config.network_alpha": network_alpha,
             "network_config.network_dim": network_dim,
             "network_config.network_args": network_args,
-            "noise_config.noise_offset": noise_offset,
-            "noise_config.adaptive_noise_scale": adaptive_noise_scale,
-            "noise_config.multires_noise_iterations": multires_noise_iterations,
-            "noise_config.multires_noise_discount": multires_noise_discount,
+            # "noise_config.noise_offset": noise_offset,
+            # "noise_config.adaptive_noise_scale": adaptive_noise_scale,
+            # "noise_config.multires_noise_iterations": multires_noise_iterations,
+            # "noise_config.multires_noise_discount": multires_noise_discount,
         }
 
         FIELD_INPUTS = list(FIELD_MAP.values())
@@ -1540,7 +1538,7 @@ def main(args):
         )
 
         save_btn.click(
-            fn=lambda *vals: save_user_config(*vals),
+            fn=save_user_config,
             inputs=FIELD_INPUTS,
             outputs=[download_btn],
         )
@@ -1576,12 +1574,13 @@ def main(args):
             inputs=[],
             outputs=[check_btn, stop_btn],
         )
-        demo.launch(share=args.share)
+        demo.launch(share=args.share, allowed_paths=[root_dir])
 
 
 if __name__ == "__main__":
     args = parse_args()
-    global train_type, model_path
+    global train_type, model_path, vae_path
     train_type = args.train_type
     model_path = args.model_path
+    vae_path = args.vae_path
     main(args)

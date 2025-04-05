@@ -34,14 +34,9 @@ network_module = "networks.lora_flux"
 network_alpha = 32
 network_args = ""
 
-[noise_config]
-noise_offset = 0.1
-adaptive_noise_scale = 0.01
-multires_noise_iterations = 0.3
-multires_noise_discount = 6
-
 [sample_config]
-sample_every_n_epochs = 400
+sample_every_n_epochs = 1
+num_prompts = 1
 sample_at_first = true
 sample_prompts = "/content/colab_ui/config/sample_prompt.toml"
 sample_sampler= "euler"

@@ -1,6 +1,6 @@
 [training_config]
 pretrained_model_name_or_path = ""
-vae = "/content/models/sdxl.vae.safetensors"
+vae = ""
 output_dir = "/content/output"
 output_name = "hius"
 max_train_epochs = 10
@@ -32,14 +32,9 @@ network_module = "networks.lora"
 network_alpha = 32
 network_args = ""
 
-[noise_config]
-noise_offset = 0.1
-adaptive_noise_scale = 0.01
-multires_noise_iterations = 0.3
-multires_noise_discount = 6
-
 [sample_config]
-sample_every_n_steps = 400
+sample_every_n_epochs = 1
+num_prompts = 1
 sample_at_first = true
 sample_prompts = "/content/colab_ui/config/sample_prompt.toml"
 
