@@ -16,6 +16,7 @@ max_data_loader_n_workers = 2
 persistent_data_loader_workers = true
 gradient_checkpointing = true
 highvram = true
+fp8_base = true
 network_train_unet_only = true
 cache_latents_to_disk = true
 
@@ -29,13 +30,12 @@ lr_warmup_steps = 0
 
 [network_config]
 network_dim = 32
-text_encoder_lr = 1e-5
 network_module = "networks.lora_flux"
 network_alpha = 32
 network_args = ""
 
 [sample_config]
-sample_every_n_epochs = 1
+sample_every_n_steps = 100
 num_prompts = 1
 sample_at_first = true
 sample_prompts = "/content/colab_ui/config/sample_prompt.toml"

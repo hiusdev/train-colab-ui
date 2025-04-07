@@ -1276,11 +1276,11 @@ def main(args):
 
                     gr.Markdown("## Sample Config")
 
-                    sample_every_n_epochs = number_from_config(
+                    sample_every_n_steps = number_from_config(
                         CONFIG,
-                        "sample_config.sample_every_n_epochs",
-                        "Sample Every N Epochs",
-                        info="Generate sample images every N epochs",
+                        "sample_config.sample_every_n_steps",
+                        "Sample Every N Step",
+                        info="Generate sample images every N step",
                     )
                     num_prompts = number_from_config(
                         CONFIG,
@@ -1481,7 +1481,7 @@ def main(args):
             "advanced_config.author": author,
             "dataset_config.flip_aug": flip_aug,
             "dataset_config.keep_tokens": keep_tokens,
-            "sample_config.sample_every_n_epochs": sample_every_n_epochs,
+            "sample_config.sample_every_n_steps": sample_every_n_steps,
             # "sample_config.sample_prompts": sample_prompts,
             # "flux_config.guidance_scale": guidance_scale,
             "sample_config.num_prompts": num_prompts,
