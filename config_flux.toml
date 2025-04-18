@@ -31,7 +31,7 @@ lr_warmup_steps = 0
 [network_config]
 network_dim = 32
 network_module = "networks.lora_flux"
-network_alpha = 32
+network_alpha = 16
 network_args = ""
 
 [sample_config]

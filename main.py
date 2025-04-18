@@ -225,6 +225,8 @@ def process_data_dir2(data_dir, num_repeats, caption_extension, is_reg=False):
 
         if repeats:
             num_repeats = repeats
+        if class_token:
+            num_repeats = repeats
 
         # print(num_repeats)
 
@@ -287,7 +289,9 @@ def process_data_dir2(data_dir, num_repeats, caption_extension, is_reg=False):
     return subsets
 
 
-def process_data_dir(data_dir, num_repeats, caption_extension, is_reg=False):
+def process_data_dir(
+    data_dir, class_tokens, num_repeats, caption_extension, is_reg=False
+):
     if not os.path.isdir(data_dir):
         return []
 
@@ -299,6 +303,7 @@ def process_data_dir(data_dir, num_repeats, caption_extension, is_reg=False):
         folder_name = os.path.basename(folder)
         repeats, class_token = parse_folder_name(folder_name)
         current_repeats = repeats or num_repeats
+        current_class_tokens = class_token or class_tokens or None
 
         if not find_image_files(folder):
             continue
@@ -327,7 +332,9 @@ def process_data_dir(data_dir, num_repeats, caption_extension, is_reg=False):
         for ext in extensions_to_process:
             if caption_types[ext]:
                 subsets.append(
-                    create_subset(folder, current_repeats, class_token, ext, is_reg)
+                    create_subset(
+                        folder, current_repeats, current_class_tokens, ext, is_reg
+                    )
                 )
 
     return subsets
@@ -366,6 +373,7 @@ def on_generate_dataset_config(
     resolution,
     flip_aug,
     keep_tokens,
+    class_tokens,
     num_repeats,
     num_prompts,
 ):
@@ -373,9 +381,11 @@ def on_generate_dataset_config(
     config_dir = os.path.join(root_dir, "config")
     # print(config_dir)
     # Cập nhật gọi hàm với caption_extension
-    train_subsets = process_data_dir(train_data_dir, num_repeats, caption_extension)
+    train_subsets = process_data_dir(
+        train_data_dir, class_tokens, num_repeats, caption_extension
+    )
     reg_subsets = process_data_dir(
-        reg_data_dir, num_repeats, caption_extension, is_reg=True
+        reg_data_dir, class_tokens, num_repeats, caption_extension, is_reg=True
     )
 
     subsets = train_subsets + reg_subsets
@@ -390,8 +400,8 @@ def on_generate_dataset_config(
         "datasets": [
             {
                 "resolution": resolution,
-                "min_bucket_reso": 256,
-                "max_bucket_reso": 1024,
+                "min_bucket_reso": 512,
+                "max_bucket_reso": 2048,
                 "flip_aug": flip_aug,
                 "color_aug": False,
                 "face_crop_aug_range": None,
@@ -413,6 +423,7 @@ def on_generate_dataset_config(
             config[key] = None
 
     config_str = toml.dumps(config)
+
     config_sample_str = toml.dumps(update_prompt_with_subsets(config, num_prompts))
 
     with open(dataset_config, "w", encoding="utf-8") as f:
@@ -884,7 +895,7 @@ def on_setup_button_click(text_encoder, num_prompts, resolution, *values):
             "training_config"
         ]["output_name"]
 
-        content += "⚙️ Áp dụng cấu hình đặc biệt cho Flux + text_encoder\n"
+        content += "Áp dụng cấu hình đặc biệt cho Flux + text_encoder\n"
 
         # Ghi file config_final
         config_dir = os.path.join(root_dir, "config")
@@ -903,6 +914,7 @@ def on_setup_button_click(text_encoder, num_prompts, resolution, *values):
             resolution,
             config_final["dataset_config"]["flip_aug"],
             config_final["dataset_config"]["keep_tokens"],
+            config_final["dataset_config"]["class_tokens"],
             config_final["dataset_config"]["num_repeats"],
             num_prompts,
         )
@@ -1109,7 +1121,7 @@ def main(args):
                         info="Batch size used during training.",
                     )
 
-                    gr.Markdown("## ⚙️ Advanced")
+                    gr.Markdown("## Advanced")
 
                     author = textbox_from_config(
                         CONFIG,
@@ -1133,7 +1145,7 @@ def main(args):
                     )
 
                 with gr.Column():
-                    gr.Markdown("## ⚙️ Optimizer")
+                    gr.Markdown("## Optimizer")
                     optimizer_type = dropdown_from_config(
                         CONFIG,
                         "optimizer_config.optimizer_type",
@@ -1225,6 +1237,13 @@ def main(args):
                         info="Extension of caption files.",
                     )
 
+                    class_tokens = textbox_from_config(
+                        CONFIG,
+                        "dataset_config.class_tokens",
+                        "Trigger word",
+                        info="Trigger word",
+                    )
+
                     num_repeats = number_from_config(
                         CONFIG,
                         "dataset_config.num_repeats",
@@ -1254,19 +1273,22 @@ def main(args):
                     )
 
                 with gr.Column():
-                    gr.Markdown("## ⚙️ Network")
-                    network_alpha = number_from_config(
-                        CONFIG,
-                        "network_config.network_alpha",
-                        "Network Alpha",
-                        info="Alpha value for scaling LoRA weights.",
-                    )
+                    gr.Markdown("## Network")
+
                     network_dim = number_from_config(
                         CONFIG,
                         "network_config.network_dim",
                         "Network Dim",
                         info="Dimension of the LoRA network.",
                     )
+
+                    network_alpha = number_from_config(
+                        CONFIG,
+                        "network_config.network_alpha",
+                        "Network Alpha",
+                        info="Alpha value for scaling LoRA weights.",
+                    )
+
                     network_args = textbox_from_config(
                         CONFIG,
                         "network_config.network_args",
@@ -1289,7 +1311,7 @@ def main(args):
                         info="How many prompts to sample.",
                     )
 
-                    gr.Markdown("## ⚙️ Logging")
+                    gr.Markdown("## Logging")
 
                     wandb_api_key = textbox_from_config(
                         CONFIG,
@@ -1298,37 +1320,6 @@ def main(args):
                         info="Weights & Biases API key for logging (leave blank to disable).",
                     )
 
-                    # gr.Markdown("## Noise Control")
-                    # noise_offset = number_from_config(
-                    #     CONFIG,
-                    #     "noise_config.noise_offset",
-                    #     "Noise Offset",
-                    #     info="Amount of noise offset to apply (e.g., 0.1).",
-                    # )
-                    # adaptive_noise_scale = textbox_from_config(
-                    #     CONFIG,
-                    #     "noise_config.adaptive_noise_scale",
-                    #     "Adaptive Noise Scale",
-                    #     info="Noise scaled by mean absolute latent value.",
-                    # )
-                    # multires_noise_iterations = slider_from_config(
-                    #     CONFIG,
-                    #     "noise_config.multires_noise_iterations",
-                    #     "Multires Noise Iterations",
-                    #     minimum=0.1,
-                    #     maximum=1.0,
-                    #     step=0.1,
-                    #     info="How many iterations to apply multires noise.",
-                    # )
-                    # multires_noise_discount = slider_from_config(
-                    #     CONFIG,
-                    #     "noise_config.multires_noise_discount",
-                    #     "Multires Noise Discount",
-                    #     minimum=1,
-                    #     maximum=10,
-                    #     step=1,
-                    #     info="Discount multiplier for multires noise.",
-                    # )
             with gr.Row():
                 setup_btn = gr.Button("🚀Setup config")
                 with gr.Group():
@@ -1475,6 +1466,7 @@ def main(args):
             "dataset_config.train_data_dir": train_data_dir,
             "dataset_config.reg_data_dir": reg_data_dir,
             "dataset_config.caption_extension": caption_extension,
+            "dataset_config.class_tokens": class_tokens,
             "dataset_config.num_repeats": num_repeats,
             "advanced_config.save_state": save_state,
             "advanced_config.resume": resume,
